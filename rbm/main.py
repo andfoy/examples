@@ -46,6 +46,7 @@ class RBM(nn.Module):
     def __init__(self, D_in, H, N):
         super(RBM, self).__init__()
         self.in_dim = D_in
+        self.N = N
         self.rbm = RBMLayer(D_in, H, N)
         self.myparameters = Parameter(self.rbm.weight)
 
@@ -69,11 +70,12 @@ class RBMLayer(autograd.Function):
         self.weight.uniform_(-stdv, stdv)
 
     def configuration_grad(self, vis_state, hid_state):
-        grad = vis_state.mm(hid_state.t()) / vis_state.size(2)
+        # print(hid_state.t().size(1))
+        grad = vis_state.mm(hid_state.t()) / vis_state.size(1)
         return grad
 
     def binarize(self, x):
-        print(x)
+        # print(x)
         rand_source = Variable(torch.Tensor(x.size()).uniform_(0, 1))
         tmp_x = x
         if not isinstance(x, Variable):
@@ -91,21 +93,28 @@ class RBMLayer(autograd.Function):
         vis_bin = self.binarize(input)
         hid_probs = self.vis_to_hid(vis_bin)
         self.save_for_backward(hid_probs)
-        return Variable(vis_bin), Variable(hid_probs)
+        return vis_bin, hid_probs
 
     def backward(self, vis_bin, hid_probs):
         # hid_probs = self.saved_tensors
         hid_bin = self.binarize(hid_probs)
-        grad1 = self.configuration_grad(vis_bin, hid_bin)
-        for i in range(0, self.N):
+        # print(hid_bin)
+        # print(vis_bin)
+        grad1 = self.configuration_grad(vis_bin.data, hid_bin)
+        # print("Grad1")
+        # print(grad1)
+        for i in range(0, self.cd):
             vis_probs = self.hid_to_vis(hid_bin)
             vis_bin = self.binarize(vis_probs)
             hid_probs = self.vis_to_hid(vis_bin)
-            if i == self.N - 1:
+            if i == self.cd - 1:
                 hid_bin = hid_probs
                 break
             hid_bin = self.binarize(hid_probs)
         grad2 = self.configuration_grad(vis_bin, hid_bin)
+        # print(grad1)
+        # print("Grad2")
+        # print(grad2)
         return grad1 - grad2
 
 
@@ -114,16 +123,16 @@ if args.cuda:
     model.cuda()
 
 # optimizer = optim.Adam(model.parameters(), lr=1e-3)
-grad = None
-momentum = torch.zeros(500, 784)
-velocity = torch.zeros(500, 784)
-alpha = 1e-3
-eps = 1e-8
-beta1 = 0.9
-beta2 = 0.999
 
 
 def train(epoch):
+    grad = None
+    momentum = torch.zeros(500, 784)
+    velocity = torch.zeros(500, 784)
+    alpha = 1e-3
+    eps = 1e-8
+    beta1 = 0.9
+    beta2 = 0.999
     model.train()
     for batch_idx, (data, _) in enumerate(train_loader):
         data = Variable(data)
@@ -132,15 +141,17 @@ def train(epoch):
             data = data.cuda()
         # optimizer.zero_grad()
         vis, hid = model(data)
-        # if not torch.is_tensor(hid):
-            # hid = hid.data
+        if not torch.is_tensor(hid):
+            hid = hid.data
         # loss = loss_function(out)
         # loss.backward()
         grad = model.rbm.backward(vis, hid)
         momentum = beta1 * momentum + (1 - beta1) * grad
-        velocity = beta2 * velocity + (1 - beta2) * grad
-        grad += alpha * momentum / (torch.sqrt(velocity) + eps)
-        print(grad)
+        velocity = beta2 * velocity + (1 - beta2) * grad**2
+        # print(momentum)
+        # print(velocity)
+        model.rbm.weight += alpha * momentum / (torch.sqrt(velocity) + eps)
+        # print(grad)
         # optimizer.step()
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
@@ -152,3 +163,4 @@ def train(epoch):
 if __name__ == '__main__':
     for epoch in range(1, args.epochs + 1):
         train(epoch)
+        torch.save(model.state_dict(), 'rbm')
