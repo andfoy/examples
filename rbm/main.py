@@ -74,9 +74,12 @@ class RBMLayer(autograd.Function):
 
     def binarize(self, x):
         print(x)
-        rand_source = torch.Tensor(x.size()).uniform_(0, 1)
-        bin_val = x > rand_source
-        return torch.FloatTensor(x.size()).copy_(bin_val)
+        rand_source = Variable(torch.Tensor(x.size()).uniform_(0, 1))
+        tmp_x = x
+        if not isinstance(x, Variable):
+            tmp_x = Variable(x)
+        bin_val = tmp_x > rand_source
+        return torch.FloatTensor(x.size()).copy_(bin_val.data)
 
     def vis_to_hid(self, x):
         return torch.sigmoid(self.weight.mm(x))
@@ -88,7 +91,7 @@ class RBMLayer(autograd.Function):
         vis_bin = self.binarize(input)
         hid_probs = self.vis_to_hid(vis_bin)
         self.save_for_backward(hid_probs)
-        return vis_bin, hid_probs
+        return Variable(vis_bin), Variable(hid_probs)
 
     def backward(self, vis_bin, hid_probs):
         # hid_probs = self.saved_tensors
@@ -129,8 +132,8 @@ def train(epoch):
             data = data.cuda()
         # optimizer.zero_grad()
         vis, hid = model(data)
-        if not torch.is_tensor(hid):
-            hid = hid.data
+        # if not torch.is_tensor(hid):
+            # hid = hid.data
         # loss = loss_function(out)
         # loss.backward()
         grad = model.rbm.backward(vis, hid)
